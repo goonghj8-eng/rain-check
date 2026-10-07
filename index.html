@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ฝนตกไหม?</title>
+<style>
+  body { font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 16px; background:#f3f6fa; }
+  .card { background:#fff; border-radius:14px; padding:16px; margin-bottom:12px; box-shadow:0 1px 4px #0002; }
+  .big { font-size:1.4rem; font-weight:bold; }
+  .rain { color:#1565c0; } .dry { color:#2e7d32; }
+</style>
+</head>
+<body>
+<h2>🌧️ ฝนตกไหม?</h2>
+<div id="app">กำลังโหลด...</div>
+<button onclick="load()">รีเฟรช</button>
+
+<script>
+const PLACES = [
+  { name: "🏠 บ้าน",       lat: 13.7893, lon: 100.5479 },
+  { name: "🏢 ที่ทำงาน",   lat: 13.7572, lon: 100.5147 },
+];
+const RAIN_CODES = [...Array(17).keys()].map(i => 51 + i)   // 51-67
+  .concat([80,81,82,95,96,97,98,99]);
+
+async function getWeather(p) {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}` +
+    `&current=precipitation,weather_code&minutely_15=precipitation` +
+    `&hourly=precipitation_probability&timezone=Asia%2FBangkok&forecast_days=2`;
+  const d = await (await fetch(url)).json();
+
+  const nowRain = d.current.precipitation >= 0.1 || RAIN_CODES.includes(d.current.weather_code);
+
+  // หาช่อง 15 นาทีที่ใกล้ "ตอนนี้" ที่สุด แล้วรวม 4 ช่องถัดไป
+  const now = new Date(d.current.time).getTime();
+  const times = d.minutely_15.time.map(t => new Date(t).getTime());
+  const start = times.findIndex(t => t > now);
+  const next4 = d.minutely_15.precipitation.slice(start, start + 4);
+  const mm = next4.reduce((a, b) => a + (b || 0), 0);
+
+  // โอกาสฝนตกของชั่วโมงถัดไป
+  const hIdx = d.hourly.time.findIndex(t => new Date(t).getTime() > now);
+  const prob = d.hourly.precipitation_probability[hIdx];
+
+  const soonRain = mm >= 0.3 || prob >= 50;
+  return { nowRain, soonRain, mm, prob };
+}
+
+async function load() {
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  for (const p of PLACES) {
+    try {
+      const w = await getWeather(p);
+      app.innerHTML += `
+        <div class="card">
+          <div class="big">${p.name}</div>
+          <p>ตอนนี้: <b class="${w.nowRain ? 'rain':'dry'}">${w.nowRain ? 'ฝนตก 🌧️' : 'ไม่ตก ☀️'}</b></p>
+          <p>อีก 1 ชม.: <b class="${w.soonRain ? 'rain':'dry'}">${w.soonRain ? 'มีโอกาสฝนตก 🌧️' : 'น่าจะไม่ตก ☀️'}</b></p>
+          <small>ปริมาณฝนคาดการณ์ ${w.mm.toFixed(1)} มม. | โอกาสฝน ${prob(w)}%</small>
+        </div>`;
+    } catch (e) {
+      app.innerHTML += `<div class="card">${p.name}: โหลดข้อมูลไม่ได้</div>`;
+    }
+  }
+}
+const prob = w => w.prob ?? "-";
+load();
+setInterval(load, 10 * 60 * 1000); // รีเฟรชทุก 10 นาที
+</script>
+</body>
+</html>
