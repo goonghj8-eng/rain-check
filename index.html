@@ -4,70 +4,131 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ฝนตกไหม?</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
-  body { font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 16px; background:#f3f6fa; }
-  .card { background:#fff; border-radius:14px; padding:16px; margin-bottom:12px; box-shadow:0 1px 4px #0002; }
-  .big { font-size:1.4rem; font-weight:bold; }
-  .rain { color:#1565c0; } .dry { color:#2e7d32; }
+  body{font-family:sans-serif;max-width:520px;margin:0 auto;padding:16px;background:#f3f6fa}
+  .card{background:#fff;border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px #0002}
+  .big{font-size:1.3rem;font-weight:bold}
+  .rain{color:#1565c0}.dry{color:#2e7d32}
+  button{padding:10px 18px;border:0;border-radius:10px;background:#1565c0;color:#fff;font-size:1rem}
+  small{color:#555}
+  #map{height:340px;border-radius:12px;margin-top:8px}
+  .ctl{display:flex;align-items:center;gap:10px;margin-top:10px}
+  .ctl input{flex:1}
+  #ft{min-width:90px;text-align:right;font-weight:bold}
 </style>
 </head>
 <body>
 <h2>🌧️ ฝนตกไหม?</h2>
 <div id="app">กำลังโหลด...</div>
 <button onclick="load()">รีเฟรช</button>
+<p><small id="upd"></small></p>
 
+<div class="card">
+  <div class="big">📡 เรดาร์ฝน (ย้อนหลัง 2 ชม.)</div>
+  <div id="map"></div>
+  <div class="ctl">
+    <button id="pp" onclick="togglePlay()">▶</button>
+    <input type="range" id="sl" min="0" max="0" value="0" oninput="show(+this.value, true)">
+    <span id="ft">-</span>
+  </div>
+  <small id="rmsg">กำลังโหลดภาพเรดาร์...</small><br>
+  <small>สีน้ำเงิน-ม่วง = ฝนแรงขึ้น ภาพเป็นข้อมูลย้อนหลัง ไม่ใช่พยากรณ์ | ภาพเรดาร์โดย
+  <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">Rain Viewer</a></small>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 const PLACES = [
-  { name: "🏠 บ้าน",       lat: 13.7893, lon: 100.5479 },
-  { name: "🏢 ที่ทำงาน",   lat: 13.7572, lon: 100.5147 },
+  { name: "🏠 บ้าน (สะพานควาย)",    lat: 13.7893, lon: 100.5479 },
+  { name: "🏢 ที่ทำงาน (สะพานขาว)", lat: 13.7572, lon: 100.5147 },
 ];
-const RAIN_CODES = [...Array(17).keys()].map(i => 51 + i)   // 51-67
-  .concat([80,81,82,95,96,97,98,99]);
+const RAIN_CODES = [51,53,55,56,57,61,63,65,66,67,80,81,82,95,96,99];
 
+/* ---------- พยากรณ์ตัวเลข (Open-Meteo) ---------- */
 async function getWeather(p) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}` +
     `&current=precipitation,weather_code&minutely_15=precipitation` +
     `&hourly=precipitation_probability&timezone=Asia%2FBangkok&forecast_days=2`;
   const d = await (await fetch(url)).json();
-
   const nowRain = d.current.precipitation >= 0.1 || RAIN_CODES.includes(d.current.weather_code);
-
-  // หาช่อง 15 นาทีที่ใกล้ "ตอนนี้" ที่สุด แล้วรวม 4 ช่องถัดไป
   const now = new Date(d.current.time).getTime();
-  const times = d.minutely_15.time.map(t => new Date(t).getTime());
-  const start = times.findIndex(t => t > now);
-  const next4 = d.minutely_15.precipitation.slice(start, start + 4);
-  const mm = next4.reduce((a, b) => a + (b || 0), 0);
-
-  // โอกาสฝนตกของชั่วโมงถัดไป
+  const start = d.minutely_15.time.findIndex(t => new Date(t).getTime() > now);
+  const mm = d.minutely_15.precipitation.slice(start, start + 4).reduce((a, b) => a + (b || 0), 0);
   const hIdx = d.hourly.time.findIndex(t => new Date(t).getTime() > now);
   const prob = d.hourly.precipitation_probability[hIdx];
-
-  const soonRain = mm >= 0.3 || prob >= 50;
-  return { nowRain, soonRain, mm, prob };
+  return { nowRain, soonRain: mm >= 0.3 || prob >= 50, mm, prob };
 }
 
 async function load() {
   const app = document.getElementById("app");
-  app.innerHTML = "";
+  let html = "";
   for (const p of PLACES) {
     try {
       const w = await getWeather(p);
-      app.innerHTML += `
-        <div class="card">
-          <div class="big">${p.name}</div>
-          <p>ตอนนี้: <b class="${w.nowRain ? 'rain':'dry'}">${w.nowRain ? 'ฝนตก 🌧️' : 'ไม่ตก ☀️'}</b></p>
-          <p>อีก 1 ชม.: <b class="${w.soonRain ? 'rain':'dry'}">${w.soonRain ? 'มีโอกาสฝนตก 🌧️' : 'น่าจะไม่ตก ☀️'}</b></p>
-          <small>ปริมาณฝนคาดการณ์ ${w.mm.toFixed(1)} มม. | โอกาสฝน ${prob(w)}%</small>
-        </div>`;
+      html += `<div class="card"><div class="big">${p.name}</div>
+        <p>ตอนนี้: <b class="${w.nowRain ? 'rain' : 'dry'}">${w.nowRain ? 'ฝนตก 🌧️' : 'ไม่ตก ☀️'}</b></p>
+        <p>อีก 1 ชม.: <b class="${w.soonRain ? 'rain' : 'dry'}">${w.soonRain ? 'มีโอกาสฝนตก 🌧️' : 'น่าจะไม่ตก ☀️'}</b></p>
+        <small>ปริมาณฝนคาดการณ์ ${w.mm.toFixed(1)} มม. | โอกาสฝน ${w.prob ?? '-'}%</small></div>`;
     } catch (e) {
-      app.innerHTML += `<div class="card">${p.name}: โหลดข้อมูลไม่ได้</div>`;
+      html += `<div class="card">${p.name}: โหลดข้อมูลไม่ได้ (เช็กอินเทอร์เน็ต)</div>`;
     }
   }
+  app.innerHTML = html;
+  document.getElementById("upd").textContent = "อัปเดตล่าสุด " + new Date().toLocaleTimeString("th-TH");
 }
-const prob = w => w.prob ?? "-";
+
+/* ---------- แผนที่เรดาร์ (RainViewer) ---------- */
+const map = L.map("map").setView([13.773, 100.531], 9);
+const CARTO_KEY = "cb1_4d1e_1_ed72e83f1b73b909019eca63";
+L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=" + CARTO_KEY, {
+  subdomains: "abcd", maxZoom: 12,
+  attribution: "© OpenStreetMap contributors © CARTO"
+}).addTo(map);
+PLACES.forEach(p => L.marker([p.lat, p.lon]).addTo(map).bindTooltip(p.name));
+
+let frames = [], layers = [], cur = 0, timer = null, host = "";
+
+function fmt(ts) {
+  return new Date(ts * 1000).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+}
+
+function show(i, manual) {
+  if (manual) stop();
+  cur = i;
+  layers.forEach((l, k) => l.setOpacity(k === i ? 0.7 : 0));
+  document.getElementById("sl").value = i;
+  document.getElementById("ft").textContent = fmt(frames[i].time) + (i === frames.length - 1 ? " (ล่าสุด)" : "");
+}
+function stop() { clearInterval(timer); timer = null; document.getElementById("pp").textContent = "▶"; }
+function togglePlay() {
+  if (timer) return stop();
+  document.getElementById("pp").textContent = "⏸";
+  timer = setInterval(() => show((cur + 1) % frames.length), 700);
+}
+
+async function loadRadar() {
+  const msg = document.getElementById("rmsg");
+  try {
+    const d = await (await fetch("https://api.rainviewer.com/public/weather-maps.json")).json();
+    host = d.host;
+    frames = (d.radar && d.radar.past) || [];
+    if (!frames.length) { msg.textContent = "ตอนนี้ไม่มีภาพเรดาร์"; return; }
+    layers.forEach(l => map.removeLayer(l));
+    layers = frames.map(f => L.tileLayer(`${host}${f.path}/256/{z}/{x}/{y}/2/1_0.png`,
+      { opacity: 0, maxNativeZoom: 7, maxZoom: 12 }).addTo(map));
+    const sl = document.getElementById("sl");
+    sl.max = frames.length - 1;
+    show(frames.length - 1);
+    msg.textContent = "กด ▶ เพื่อดูกลุ่มฝนเคลื่อนที่ หรือเลื่อนแถบดูทีละเฟรม";
+  } catch (e) {
+    msg.textContent = "โหลดภาพเรดาร์ไม่ได้ (เช็กอินเทอร์เน็ต)";
+  }
+}
+
 load();
-setInterval(load, 10 * 60 * 1000); // รีเฟรชทุก 10 นาที
+loadRadar();
+setInterval(() => { load(); loadRadar(); }, 10 * 60 * 1000);
 </script>
 </body>
 </html>
